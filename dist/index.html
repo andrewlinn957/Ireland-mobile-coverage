@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#172722">
+  <meta name="description" content="Explore ComReg licensed mobile cell sites and estimated 4G and 5G signal across the Republic of Ireland.">
+  <title>Ireland Mobile Signal Map</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23172722'/%3E%3Ccircle cx='32' cy='36' r='5' fill='%23e3a548'/%3E%3Cpath d='M18 22a20 20 0 0 0 0 28M46 22a20 20 0 0 1 0 28' fill='none' stroke='%2375a45b' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl.css">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172722;
+      --muted: #64736d;
+      --line: #e3e9e4;
+      --panel: rgba(251, 252, 249, .97);
+      --deep: #172722;
+      --accent: #256947;
+      --shadow: 0 16px 42px rgba(17, 37, 30, .19);
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: #dce3dd; }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .map-wrap { position: relative; width: 100%; height: 100dvh; min-height: 420px; }
+    #map { position: absolute; inset: 0; background: #dce3dd; }
+    .maplibregl-ctrl-group { overflow: hidden; border: 1px solid rgba(255,255,255,.8) !important; border-radius: 11px !important; box-shadow: 0 5px 18px rgba(23,39,34,.18) !important; }
+    .maplibregl-ctrl-group button { width: 40px !important; height: 40px !important; }
+    .maplibregl-ctrl-top-right { top: 72px; right: 14px; }
+    .maplibregl-ctrl-attrib { color: #43554c !important; background: rgba(250,252,249,.88) !important; border-radius: 7px 0 0 0 !important; }
+    .maplibregl-ctrl-attrib a { color: #24583f !important; }
+    .maplibregl-ctrl-bottom-right { right: 0; bottom: 0; }
+    .maplibregl-popup-content { padding: 12px 14px; border-radius: 12px; box-shadow: 0 8px 26px rgba(17,37,30,.18); }
+    .maplibregl-popup-close-button { padding: 5px 9px; font-size: 18px; color: #63736b; }
+    .maplibregl-popup-tip { border-top-color: white; }
+    .site-popup { min-width: 210px; max-width: 280px; color: #253a30; font-size: 13px; line-height: 1.5; }
+    .site-popup h2 { margin: 0 18px 3px 0; font-size: 15px; }
+    .site-popup p { margin: 4px 0; color: #5b6c62; }
+    .site-popup ul { margin: 5px 0 0; padding-left: 17px; }
+    .topbar {
+      position: absolute; z-index: 5; left: 0; right: 0; top: 0; height: 58px;
+      display: flex; align-items: center; gap: 11px; padding: 0 17px;
+      color: #f5f8f4; background: linear-gradient(90deg, rgba(20,38,32,.97), rgba(20,38,32,.9) 48%, rgba(20,38,32,.72));
+      box-shadow: 0 4px 18px rgba(17,37,30,.16); pointer-events: none;
+    }
+    .brand-mark { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; color: #dfaa56; background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; }
+    .brand-mark svg { width: 21px; height: 21px; }
+    .brand-copy { min-width: 0; display: grid; gap: 1px; }
+    .brand-kicker { color: #c4d5ca; font-size: 10px; font-weight: 760; letter-spacing: .13em; text-transform: uppercase; }
+    .brand-title { margin: 0; color: #fff; font-size: 17px; line-height: 1.1; font-weight: 710; letter-spacing: -.02em; }
+    .topbar-data { margin-left: auto; color: #d0ded4; font-size: 12px; font-weight: 560; white-space: nowrap; }
+    .control-panel {
+      position: absolute; z-index: 4; left: 16px; top: 73px; bottom: 16px; width: 330px; max-height: calc(100% - 89px);
+      display: flex; flex-direction: column; overflow: auto; overscroll-behavior: contain;
+      color: var(--ink); background: var(--panel); border: 1px solid rgba(255,255,255,.94); border-radius: 16px; box-shadow: var(--shadow); backdrop-filter: blur(16px);
+      scrollbar-width: thin; scrollbar-color: #c9d4cc transparent;
+    }
+    .panel-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 15px 16px 12px; border-bottom: 1px solid var(--line); }
+    .panel-head h2 { margin: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.01em; }
+    .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .control-block { padding: 13px 16px 0; }
+    .section-label { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 7px; color: #495d52; font-size: 12px; font-weight: 750; letter-spacing: .045em; }
+    .section-label small { color: #7b8981; font-size: 11px; font-weight: 540; letter-spacing: 0; }
+    .choice-row { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
+    .choice-row button, .tech-row button {
+      min-height: 37px; border: 1px solid #dce4dc; border-radius: 9px; color: #465950; background: #f7f9f6; cursor: pointer;
+      font-size: 12px; font-weight: 690; transition: background .12s ease, border-color .12s ease, color .12s ease;
+    }
+    .choice-row button:hover, .tech-row button:hover { border-color: #95ad9a; }
+    .choice-row button[aria-pressed="true"], .tech-row button[aria-pressed="true"] { color: #fff; background: var(--deep); border-color: var(--deep); }
+    .tech-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .tech-row button { min-height: 40px; font-size: 14px; }
+    .toggle-list { display: grid; gap: 2px; }
+    .toggle-row { min-height: 37px; display: flex; align-items: center; gap: 9px; color: #3d5147; font-size: 13px; font-weight: 610; cursor: pointer; }
+    .toggle-row input { width: 16px; height: 16px; margin: 0; accent-color: #256947; }
+    .toggle-detail { margin-left: auto; color: #7a8980; font-size: 11px; font-weight: 540; }
+    .network-legend { display: flex; flex-wrap: wrap; gap: 8px 13px; padding: 0 0 3px 25px; color: #68776e; font-size: 11px; }
+    .network-key { display: inline-flex; align-items: center; gap: 5px; }
+    .network-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .network-dot[data-network="eir"] { background: #b44860; }
+    .network-dot[data-network="three"] { background: #4567a8; }
+    .network-dot[data-network="vodafone"] { background: #d34b43; }
+    .legend { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+    .legend li { display: grid; grid-template-columns: 17px 1fr auto; align-items: center; gap: 7px; min-height: 19px; color: #48594f; font-size: 12px; }
+    .swatch { width: 15px; height: 7px; border-radius: 99px; }
+    .swatch[data-band="high"] { background: #256947; }
+    .swatch[data-band="usable"] { background: #75a45b; }
+    .swatch[data-band="fringe"] { background: #e3a548; }
+    .swatch[data-band="gap"] { background: #c85146; }
+    .swatch[data-band="unknown"] { background: #8b938e; }
+    .legend-range { color: #78867e; font-size: 11px; white-space: nowrap; }
+    .sensitivity-key { width: 15px; height: 12px; border: 1px solid rgba(28,44,42,.2); border-radius: 3px; background: repeating-linear-gradient(135deg, rgba(22,34,36,.82) 0 2px, transparent 2px 5px); }
+    .signal-note { margin: 10px 0 0; padding: 9px 10px; color: #485a50; background: #eff4ee; border: 1px solid #e0e9df; border-radius: 9px; font-size: 12px; line-height: 1.4; }
+    .signal-note strong { display: block; color: #274436; font-size: 12px; }
+    details.method { margin: 12px 16px 15px; border-top: 1px solid var(--line); }
+    details.method summary { padding: 11px 0 3px; color: #385347; font-size: 12px; font-weight: 700; cursor: pointer; }
+    .method-copy { color: #64736b; font-size: 12px; line-height: 1.5; }
+    .method-copy p { margin: 6px 0; }
+    .method-copy ul { margin: 5px 0 8px; padding-left: 17px; }
+    .method-copy li { margin: 3px 0; }
+    .method-copy a { color: #245d43; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    .map-status { position: absolute; z-index: 3; right: 14px; top: 70px; padding: 7px 10px; color: #395045; background: rgba(249,251,247,.93); border: 1px solid rgba(255,255,255,.9); border-radius: 9px; box-shadow: 0 5px 15px rgba(17,37,30,.12); font-size: 11px; font-weight: 650; }
+    .map-status[hidden] { display: none; }
+    .loading-shade { position: absolute; z-index: 2; inset: 58px 0 0; display: grid; place-items: center; pointer-events: none; }
+    .loading-message { display: grid; justify-items: center; gap: 9px; padding: 13px 17px; color: #3d5549; background: rgba(250,252,249,.93); border: 1px solid rgba(255,255,255,.95); border-radius: 13px; box-shadow: 0 7px 25px rgba(17,37,30,.14); font-size: 13px; font-weight: 620; }
+    .spinner { width: 19px; height: 19px; border: 2px solid #d7e1d7; border-top-color: #256947; border-radius: 50%; animation: turn .85s linear infinite; }
+    @keyframes turn { to { transform: rotate(360deg); } }
+    .error-message { display: none; position: absolute; z-index: 7; left: 50%; top: 50%; width: min(390px, calc(100% - 28px)); padding: 16px; transform: translate(-50%,-50%); color: #422e2c; background: #fff8f6; border: 1px solid #edc9c3; border-radius: 13px; box-shadow: var(--shadow); font-size: 14px; line-height: 1.5; }
+    .error-message[data-visible="true"] { display: block; }
+    .maplibregl-canvas { outline: none; }
+    @media (max-width: 700px) {
+      .topbar { height: 52px; gap: 9px; padding: 0 12px; }
+      .brand-mark { width: 31px; height: 31px; border-radius: 9px; }
+      .brand-kicker { font-size: 9px; }
+      .brand-title { font-size: 15px; }
+      .topbar-data { font-size: 10px; }
+      .control-panel { left: 9px; right: 9px; top: auto; bottom: max(10px, env(safe-area-inset-bottom)); width: auto; max-height: min(52dvh, 440px); border-radius: 15px; }
+      .panel-head { padding: 12px 14px 10px; }
+      .control-block { padding: 11px 14px 0; }
+      details.method { margin: 10px 14px 12px; }
+      .maplibregl-ctrl-top-right { top: 60px; right: 10px; }
+      .maplibregl-ctrl-group button { width: 38px !important; height: 38px !important; }
+      .map-status { top: 60px; right: 58px; max-width: calc(100% - 74px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .loading-shade { inset: 52px 0 0; }
+    }
+    @media (max-width: 390px) {
+      .topbar-data { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+      .choice-row { gap: 4px; }
+      .choice-row button { font-size: 11px; }
+      .legend-range { font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="map-wrap" aria-label="Ireland mobile signal map">
+    <div id="map" aria-label="Interactive map of mobile cell sites and estimated signal across the Republic of Ireland"></div>
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5.2 6.1a8.5 8.5 0 0 0 0 11.8M18.8 6.1a8.5 8.5 0 0 1 0 11.8M8.4 8.9a4.4 4.4 0 0 0 0 6.2m7.2-6.2a4.4 4.4 0 0 1 0 6.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/></svg>
+      </div>
+      <div class="brand-copy"><span class="brand-kicker">Republic of Ireland</span><h1 class="brand-title">Mobile signal map</h1></div>
+      <div id="topbar-data" class="topbar-data">4G · All networks</div>
+    </header>
+
+    <section class="control-panel" aria-label="Map layers and signal legend">
+      <div class="panel-head">
+        <div><h2>Cell sites &amp; estimated coverage</h2><p id="site-record-summary">Loading ComReg site records…</p></div>
+      </div>
+
+      <div class="control-block">
+        <div class="section-label"><span>Network</span><small id="network-summary">Strongest estimate across networks</small></div>
+        <div class="choice-row" role="group" aria-label="Choose mobile network">
+          <button type="button" data-network="all" aria-pressed="true">All</button>
+          <button type="button" data-network="eir" aria-pressed="false">Eir</button>
+          <button type="button" data-network="three" aria-pressed="false">Three</button>
+          <button type="button" data-network="vodafone" aria-pressed="false">Vodafone</button>
+        </div>
+      </div>
+
+      <div class="control-block">
+        <div class="section-label"><span>Signal layer</span><small>Choose technology</small></div>
+        <div class="tech-row" role="group" aria-label="Choose mobile technology">
+          <button type="button" data-technology="4g" aria-pressed="true">4G</button>
+          <button type="button" data-technology="5g" aria-pressed="false">5G</button>
+        </div>
+      </div>
+
+      <div class="control-block">
+        <div class="section-label"><span>Map layers</span></div>
+        <div class="toggle-list">
+          <label class="toggle-row"><input id="show-sites" type="checkbox" checked><span>Cell sites</span><span id="site-count" class="toggle-detail">—</span></label>
+          <div class="network-legend" aria-label="Cell site network colours">
+            <span class="network-key"><i class="network-dot" data-network="eir"></i>Eir</span>
+            <span class="network-key"><i class="network-dot" data-network="three"></i>Three</span>
+            <span class="network-key"><i class="network-dot" data-network="vodafone"></i>Vodafone</span>
+          </div>
+          <label class="toggle-row"><input id="show-sensitivity" type="checkbox"><span>Borderline signal areas</span><span class="toggle-detail">±10 dB</span></label>
+        </div>
+      </div>
+
+      <div class="control-block">
+        <div class="section-label"><span>Estimated signal</span><small>dBm</small></div>
+        <ul class="legend" aria-label="Signal estimate colours">
+          <li><span class="swatch" data-band="high"></span><span>Higher link potential</span><span class="legend-range">≥ −95</span></li>
+          <li><span class="swatch" data-band="usable"></span><span>Usable estimate</span><span class="legend-range">−105 to &lt; −95</span></li>
+          <li><span class="swatch" data-band="fringe"></span><span>Fringe estimate</span><span class="legend-range">−115 to &lt; −105</span></li>
+          <li><span class="swatch" data-band="gap"></span><span>Possible gap</span><span class="legend-range">&lt; −115</span></li>
+          <li><span class="swatch" data-band="unknown"></span><span>Model inputs unavailable</span><span class="legend-range">—</span></li>
+          <li><span class="sensitivity-key" aria-hidden="true"></span><span>Near a colour boundary</span><span class="legend-range">±10 dB</span></li>
+        </ul>
+        <p class="signal-note"><strong>Estimated signal. Actual signal may vary.</strong>Borderline areas can shift colour with a modest change in modelled signal.</p>
+      </div>
+
+      <details class="method">
+        <summary>About this estimate</summary>
+        <div class="method-copy">
+          <p>Coverage is modelled from ComReg’s licensed site locations, frequency bands and maximum EIRP, using terrain profiles, CORINE land-cover clutter and ITU-R P.1812-8 propagation. The receiver is 1.5 m above ground.</p>
+          <p>The stripes flag estimates within 10 dB of a colour cutoff. They show class sensitivity, not a statistical confidence interval.</p>
+          <ul>
+            <li>Licence schedules do not give the active sector, antenna direction, downtilt or actual antenna height.</li>
+            <li>The model’s 48 dB link allowance is uncalibrated. The map is an indicative estimate, not measured handset coverage.</li>
+            <li>The national layer is sampled on an approximately 300 m ground grid. Terrain uses about 90 m pixels; land cover is from 2018.</li>
+          </ul>
+          <p>Sources: <a href="https://www.comreg.ie/industry/radio-spectrum/licensing/search-licence-type/mobile-licences-2/" target="_blank" rel="noreferrer">ComReg mobile site schedules</a> (Q1 2026), <a href="https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/" target="_blank" rel="noreferrer">Natural Earth country boundary</a>, <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">Mapzen terrain tiles</a>, <a href="https://land.copernicus.eu/en/products/corine-land-cover/clc2018" target="_blank" rel="noreferrer">CORINE Land Cover 2018</a> and <a href="https://www.itu.int/rec/R-REC-P.1812/en" target="_blank" rel="noreferrer">ITU-R P.1812</a>. Map tiles © OpenStreetMap contributors.</p>
+        </div>
+      </details>
+    </section>
+
+    <div id="map-status" class="map-status" hidden>Estimated 4G · All networks</div>
+    <div id="loading-shade" class="loading-shade" aria-live="polite"><div class="loading-message"><span class="spinner" aria-hidden="true"></span><span id="loading-text">Loading the national signal map…</span></div></div>
+    <div id="error-message" class="error-message" role="alert"></div>
+  </main>
+
+  <script type="module">
+    const NETWORKS = [
+      { id: "eir", label: "Eir", color: "#b44860" },
+      { id: "three", label: "Three", color: "#4567a8" },
+      { id: "vodafone", label: "Vodafone", color: "#d34b43" }
+    ];
+    const SITE_SOURCE_URL = "./data/cell-sites.geojson";
+    const METADATA_URL = "./data/coverage-metadata.json";
+    let map;
+    let metadata;
+    let siteFeatureCollection;
+    let selectedNetwork = "all";
+    let selectedTechnology = "4g";
+    let showSites = true;
+    let showSensitivity = false;
+    let currentCoverageKey = "";
+    let currentSensitivityKey = "";
+    let siteCountsByNetwork = { all: 0, eir: 0, three: 0, vodafone: 0 };
+    let maplibregl;
+
+    const $ = (selector) => document.querySelector(selector);
+    const setError = (message) => {
+      $("#error-message").textContent = message;
+      $("#error-message").dataset.visible = "true";
+    };
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+    }[character]));
+
+    function setNetworkControls() {
+      document.querySelectorAll("button[data-network]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.network === selectedNetwork));
+      });
+      document.querySelectorAll("[data-technology]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.technology === selectedTechnology));
+      });
+      const networkName = selectedNetwork === "all" ? "All networks" : NETWORKS.find((network) => network.id === selectedNetwork).label;
+      $("#topbar-data").textContent = `${selectedTechnology.toUpperCase()} · ${networkName}`;
+      $("#map-status").textContent = `Estimated ${selectedTechnology.toUpperCase()} · ${networkName}`;
+      $("#network-summary").textContent = selectedNetwork === "all" ? "Strongest estimate across networks" : `${networkName} site estimates`;
+      $("#site-count").textContent = (siteCountsByNetwork[selectedNetwork] || 0).toLocaleString();
+    }
+
+    function setSiteLayerVisibility() {
+      if (!map) return;
+      for (const network of NETWORKS) {
+        const visible = showSites && (selectedNetwork === "all" || selectedNetwork === network.id) ? "visible" : "none";
+        for (const suffix of ["clusters", "cluster-count", "points"]) {
+          const id = `sites-${network.id}-${suffix}`;
+          if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", visible);
+        }
+      }
+    }
+
+    function addCoverageLayer() {
+      const provider = selectedNetwork === "all" ? "all" : selectedNetwork;
+      const key = `${provider}-${selectedTechnology}`;
+      const filename = `coverage-${key}.png`;
+      if (key !== currentCoverageKey) {
+        if (map.getLayer("coverage-current")) map.removeLayer("coverage-current");
+        if (map.getSource("coverage-current")) map.removeSource("coverage-current");
+        map.addSource("coverage-current", {
+          type: "image",
+          url: `./data/${filename}`,
+          coordinates: metadata.imageCoordinates
+        });
+        map.addLayer({
+          id: "coverage-current",
+          type: "raster",
+          source: "coverage-current",
+          paint: { "raster-opacity": 0.82, "raster-resampling": "nearest" }
+        }, "ireland-outline");
+        currentCoverageKey = key;
+      }
+      addSensitivityLayer();
+    }
+
+    function addSensitivityLayer() {
+      const provider = selectedNetwork === "all" ? "all" : selectedNetwork;
+      const key = `${provider}-${selectedTechnology}`;
+      const filename = `sensitivity-${key}.png`;
+      if (key !== currentSensitivityKey) {
+        if (map.getLayer("sensitivity-current")) map.removeLayer("sensitivity-current");
+        if (map.getSource("sensitivity-current")) map.removeSource("sensitivity-current");
+        map.addSource("sensitivity-current", {
+          type: "image",
+          url: `./data/${filename}`,
+          coordinates: metadata.imageCoordinates
+        });
+        map.addLayer({
+          id: "sensitivity-current",
+          type: "raster",
+          source: "sensitivity-current",
+          layout: { visibility: showSensitivity ? "visible" : "none" },
+          paint: { "raster-opacity": 1, "raster-resampling": "nearest" }
+        }, "ireland-outline");
+        currentSensitivityKey = key;
+      } else if (map.getLayer("sensitivity-current")) {
+        map.setLayoutProperty("sensitivity-current", "visibility", showSensitivity ? "visible" : "none");
+      }
+      const source = map.getSource("sensitivity-current");
+      if (source && map.getLayer("sensitivity-current")) {
+        map.setLayoutProperty("sensitivity-current", "visibility", showSensitivity ? "visible" : "none");
+      }
+    }
+
+    function addSiteSources() {
+      for (const network of NETWORKS) {
+        const features = siteFeatureCollection.features.filter((feature) => feature.properties.network === network.label);
+        const sourceId = `sites-${network.id}`;
+        map.addSource(sourceId, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features },
+          cluster: true,
+          clusterRadius: 42,
+          clusterMaxZoom: 10
+        });
+        map.addLayer({
+          id: `sites-${network.id}-clusters`,
+          type: "circle",
+          source: sourceId,
+          filter: ["has", "point_count"],
+          paint: {
+            "circle-color": network.color,
+            "circle-radius": ["step", ["get", "point_count"], 12, 20, 16, 100, 20, 500, 24],
+            "circle-stroke-width": 1.5,
+            "circle-stroke-color": "#ffffff",
+            "circle-opacity": 0.94
+          }
+        });
+        map.addLayer({
+          id: `sites-${network.id}-cluster-count`,
+          type: "symbol",
+          source: sourceId,
+          filter: ["has", "point_count"],
+          layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11, "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"] },
+          paint: { "text-color": "#ffffff" }
+        });
+        map.addLayer({
+          id: `sites-${network.id}-points`,
+          type: "circle",
+          source: sourceId,
+          filter: ["!", ["has", "point_count"]],
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 2.2, 9, 4, 12, 5.5],
+            "circle-color": network.color,
+            "circle-stroke-color": "#fffefa",
+            "circle-stroke-width": 1.3,
+            "circle-opacity": 0.96
+          }
+        });
+      }
+      setSiteLayerVisibility();
+    }
+
+    function popupHtml(feature) {
+      const properties = feature.properties || {};
+      let bands = [];
+      try { bands = JSON.parse(properties.bandsJson || "[]"); } catch {}
+      const rows = bands.map((band) => {
+        const technology = (band.technology || []).join(" / ") || "Licensed band";
+        return `<li>${escapeHtml(band.frequencyMHz)} MHz · ${escapeHtml(technology)} · max ${escapeHtml(band.maxEirpDbm)} dBm EIRP</li>`;
+      }).join("");
+      return `<div class="site-popup"><h2>${escapeHtml(properties.network)} site record</h2><p>Licensed ${escapeHtml((properties.technologies || []).join(" and "))} bands</p><p>Licensed frequencies and maximum EIRP:</p><ul>${rows || "<li>No band detail available</li>"}</ul></div>`;
+    }
+
+    function bindSiteInteractions() {
+      for (const network of NETWORKS) {
+        const pointsId = `sites-${network.id}-points`;
+        const clustersId = `sites-${network.id}-clusters`;
+        map.on("click", pointsId, (event) => {
+          const feature = event.features?.[0];
+          if (!feature) return;
+          new maplibregl.Popup({ closeButton: true, offset: 9, maxWidth: "310px" })
+            .setLngLat(event.lngLat).setHTML(popupHtml(feature)).addTo(map);
+        });
+        map.on("click", clustersId, (event) => {
+          const feature = event.features?.[0];
+          if (!feature) return;
+          const source = map.getSource(`sites-${network.id}`);
+          source.getClusterExpansionZoom(feature.properties.cluster_id, (error, zoom) => {
+            if (!error) map.easeTo({ center: feature.geometry.coordinates, zoom });
+          });
+        });
+        map.on("mouseenter", pointsId, () => { map.getCanvas().style.cursor = "pointer"; });
+        map.on("mouseleave", pointsId, () => { map.getCanvas().style.cursor = ""; });
+        map.on("mouseenter", clustersId, () => { map.getCanvas().style.cursor = "pointer"; });
+        map.on("mouseleave", clustersId, () => { map.getCanvas().style.cursor = ""; });
+      }
+    }
+
+    async function start() {
+      try {
+        maplibregl = await import("https://unpkg.com/maplibre-gl@6.11.2/dist/maplibre-gl.mjs");
+        map = new maplibregl.Map({
+          container: "map",
+          center: [-8.1, 53.35],
+          zoom: 5.65,
+          minZoom: 4.4,
+          maxZoom: 15,
+          attributionControl: true,
+          style: {
+            version: 8,
+            sources: {
+              osm: {
+                type: "raster",
+                tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+                tileSize: 256,
+                maxzoom: 19,
+                attribution: "© OpenStreetMap contributors"
+              }
+            },
+            glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+            layers: [
+              { id: "osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.28, "raster-contrast": 0.04 } }
+            ]
+          }
+        });
+        map.addControl(new maplibregl.NavigationControl({ showCompass: false, visualizePitch: false }), "top-right");
+        map.on("load", async () => {
+          try {
+            const [boundaryResponse, sitesResponse, metadataResponse] = await Promise.all([
+              fetch("./data/ireland-boundary.geojson", { headers: { Accept: "application/geo+json, application/json" } }),
+              fetch(SITE_SOURCE_URL, { headers: { Accept: "application/geo+json, application/json" } }),
+              fetch(METADATA_URL, { headers: { Accept: "application/json" } })
+            ]);
+            if (!boundaryResponse.ok || !sitesResponse.ok || !metadataResponse.ok) throw new Error("The coverage data could not be loaded.");
+            const [boundary, sites, info] = await Promise.all([boundaryResponse.json(), sitesResponse.json(), metadataResponse.json()]);
+            metadata = info;
+            siteFeatureCollection = sites;
+            const siteCount = sites.features.length;
+            siteCountsByNetwork = { all: siteCount, eir: 0, three: 0, vodafone: 0 };
+            for (const feature of sites.features) {
+              const network = String(feature.properties.network || "").toLowerCase();
+              const key = network === "eir" ? "eir" : network === "three" ? "three" : network === "vodafone" ? "vodafone" : null;
+              if (key) siteCountsByNetwork[key] += 1;
+            }
+            $("#site-record-summary").textContent = `${siteCount.toLocaleString()} licensed network-site records · Q1 2026`;
+            $("#site-count").textContent = siteCount.toLocaleString();
+            map.addSource("ireland", { type: "geojson", data: boundary });
+            map.addLayer({ id: "ireland-fill", type: "fill", source: "ireland", paint: { "fill-color": "#f4f6f0", "fill-opacity": 0.055 } });
+            map.addLayer({ id: "ireland-outline", type: "line", source: "ireland", paint: { "line-color": "#344f43", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.1, 9, 1.8], "line-opacity": 0.88 } });
+            addSiteSources();
+            addCoverageLayer();
+            bindSiteInteractions();
+            const fitPadding = window.matchMedia("(max-width: 700px)").matches
+              ? { top: 64, right: 18, bottom: Math.min(window.innerHeight * 0.55, 470), left: 18 }
+              : { top: 78, right: 68, bottom: 48, left: 370 };
+            map.fitBounds([[-10.9, 51.25], [-5.2, 55.55]], { padding: fitPadding, duration: 0 });
+            $("#loading-shade").style.display = "none";
+            $("#map-status").hidden = false;
+            setNetworkControls();
+          } catch (error) {
+            $("#loading-text").textContent = "The national coverage data could not be loaded.";
+            setError(error.message || "The national coverage data could not be loaded.");
+          }
+        });
+        map.on("error", (event) => {
+          if (event?.error) console.warn("Map resource error", event.error.message || event.error);
+        });
+      } catch (error) {
+        $("#loading-shade").style.display = "none";
+        setError("The interactive map could not start. Check that the map service is available and reload the page.");
+        console.error(error);
+      }
+    }
+
+    document.querySelectorAll("[data-network]").forEach((button) => button.addEventListener("click", () => {
+      selectedNetwork = button.dataset.network;
+      setNetworkControls();
+      setSiteLayerVisibility();
+      if (metadata && map?.isStyleLoaded()) addCoverageLayer();
+    }));
+    document.querySelectorAll("[data-technology]").forEach((button) => button.addEventListener("click", () => {
+      selectedTechnology = button.dataset.technology;
+      setNetworkControls();
+      if (metadata && map?.isStyleLoaded()) addCoverageLayer();
+    }));
+    $("#show-sites").addEventListener("change", (event) => {
+      showSites = event.currentTarget.checked;
+      setSiteLayerVisibility();
+    });
+    $("#show-sensitivity").addEventListener("change", (event) => {
+      showSensitivity = event.currentTarget.checked;
+      if (metadata && map?.isStyleLoaded()) addSensitivityLayer();
+    });
+    window.addEventListener("resize", () => map?.resize());
+    start();
+  </script>
+</body>
+</html>
