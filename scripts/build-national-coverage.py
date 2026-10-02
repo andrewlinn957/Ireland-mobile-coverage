@@ -2,8 +2,10 @@
 """Build the national raster layers for the Ireland mobile signal map.
 
 Uses the ComReg catalogue and the same Δ-Bullington implementation and
-link-budget assumptions as the trail atlas. Coverage is calculated on a
-500 m Web Mercator grid, about 300 m on the ground at Irish latitudes.
+link-budget assumptions as the trail atlas. Site-specific planning-derived
+antenna-height estimates are used where available; otherwise the nominal 30 m
+transmitter-height default applies. Coverage is calculated on a Web Mercator
+grid whose spacing is configured by GRID_M.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 import json
 import math
 import multiprocessing
+import csv
 import sys
 import time
 from itertools import islice
@@ -26,6 +29,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 SITES_PATH = ROOT / "dist/data/mobile-sites.json"
+SITE_HEIGHTS_PATH = ROOT / "model-inputs/mobile-site-height-estimates.csv"
 BOUNDARY_PATH = ROOT / "model-inputs/ireland-boundary.geojson"
 CLIMATE_PATH = ROOT / "model-inputs/mobile-climate.json"
 CLUTTER_DIR = ROOT / "model-inputs/mobile-clutter"
@@ -468,7 +472,7 @@ def p1812_first_term_spherical_loss(distance_km: float, frequency_ghz: float,
 
 def p1812_delta_bullington(terrain: np.ndarray, clutter: np.ndarray, distance_m: float,
                            frequency_mhz: float, delta_n: float,
-                           sea_flags: np.ndarray) -> float | None:
+                           sea_flags: np.ndarray, transmitter_height_m: float = TX_HEIGHT_M) -> float | None:
     if len(terrain) < 3 or len(terrain) != len(clutter) or not math.isfinite(distance_m) or distance_m <= 0:
         return None
     if not np.isfinite(terrain).all() or not np.isfinite(clutter).all():
@@ -479,7 +483,7 @@ def p1812_delta_bullington(terrain: np.ndarray, clutter: np.ndarray, distance_m:
     if not (frequency_ghz > 0 and effective_earth_km > 0):
         return None
     distance_km = distance_m / 1000
-    htc = float(terrain[0]) + TX_HEIGHT_M
+    htc = float(terrain[0]) + transmitter_height_m
     hrc = float(terrain[-1]) + RX_HEIGHT_M
     surface = terrain.astype(np.float64).copy()
     surface[1:-1] += clutter[1:-1]
@@ -518,13 +522,54 @@ def p1812_delta_bullington(terrain: np.ndarray, clutter: np.ndarray, distance_m:
     return bullington_actual + max(spherical - bullington_smooth, 0.0)
 
 
-def build_site_band_indexes(sites_data: dict) -> dict:
+def load_site_height_estimates(sites_data: dict) -> tuple[list[dict], dict]:
+    """Load planning-derived top-antenna estimates aligned to ComReg record order."""
+    networks = sites_data["networks"]
+    records = sites_data["records"]
+    with SITE_HEIGHTS_PATH.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    if len(rows) != len(records):
+        raise ValueError(f"Site-height input has {len(rows)} rows; expected {len(records)}")
+    aligned = []
+    status_counts: dict[str, int] = {}
+    applied = 0
+    for index, (row, site) in enumerate(zip(rows, records)):
+        if int(row["recordIndex"]) != index:
+            raise ValueError(f"Site-height record order mismatch at row {index}")
+        if (row["network"] != networks[int(site[0])] or
+                abs(float(row["longitude"]) - float(site[1])) > 1e-6 or
+                abs(float(row["latitude"]) - float(site[2])) > 1e-6):
+            raise ValueError(f"Site-height identity/coordinate mismatch at record {index}")
+        raw_height = row["estimatedAntennaHeightM"].strip()
+        height = TX_HEIGHT_M if not raw_height else float(raw_height)
+        if not math.isfinite(height) or not 1.0 <= height <= 120.0:
+            raise ValueError(f"Invalid transmitter height {height} at record {index}")
+        status = row["estimateStatus"] or "default_30m"
+        if raw_height:
+            applied += 1
+            status_counts[status] = status_counts.get(status, 0) + 1
+        aligned.append({"height_m": height, "status": status})
+    summary = {
+        "source": "model-inputs/mobile-site-height-estimates.csv",
+        "method": "For a planning match within 30 m, use stated mast/support structure height minus 1 m as an estimated highest/top-mounted antenna height; otherwise retain the 30 m default.",
+        "defaultHeightM": TX_HEIGHT_M,
+        "recordsTotal": len(records),
+        "recordsWithEstimate": applied,
+        "recordsUsingDefault": len(records) - applied,
+        "heightStatusCounts": status_counts,
+        "planningMatchMaximumDistanceM": 30,
+        "identityCaveat": "Planning/site matches are largely automated coordinate/text candidates and are not individually verified; proposed and ambiguous records are retained with status labels.",
+    }
+    return aligned, summary
+
+
+def build_site_band_indexes(sites_data: dict, site_heights: list[dict] | None = None) -> dict:
     indexes = {}
     for technology, bit in TECH_BITS.items():
         indexes[technology] = {}
         for network_index, network in enumerate(sites_data["networks"]):
-            lons, lats, frequency, base_power = [], [], [], []
-            for site in sites_data["records"]:
+            lons, lats, frequency, base_power, tx_heights = [], [], [], [], []
+            for record_index, site in enumerate(sites_data["records"]):
                 if site[0] != network_index:
                     continue
                 best = None
@@ -539,11 +584,13 @@ def build_site_band_indexes(sites_data: dict) -> dict:
                     lats.append(float(site[2]))
                     frequency.append(best[1])
                     base_power.append(best[0])
+                    tx_heights.append(float(site_heights[record_index]["height_m"]) if site_heights else TX_HEIGHT_M)
             indexes[technology][network] = {
                 "lon": np.asarray(lons, dtype=np.float64),
                 "lat": np.asarray(lats, dtype=np.float64),
                 "frequency": np.asarray(frequency, dtype=np.float64),
                 "base_power": np.asarray(base_power, dtype=np.float64),
+                "tx_height": np.asarray(tx_heights, dtype=np.float64),
             }
             log(f"{network} {technology.upper()}: {len(lons):,} site-band candidates")
     return indexes
@@ -606,6 +653,7 @@ def candidates_at(lon: float, lat: float, sites: dict, technology: str) -> list[
                 "distance_m": exact_distance,
                 "nominal_dbm": exact_nominal,
                 "frequency_mhz": float(data["frequency"][site_index]),
+                "tx_height_m": float(data["tx_height"][site_index]),
             })
         per_network.append(selected)
     return [candidate for network_candidates in per_network for candidate in network_candidates]
@@ -628,7 +676,8 @@ def link_signal(candidate: dict, receiver_lon: float, receiver_lat: float,
     if climatology is None:
         return None
     diffraction_db = p1812_delta_bullington(
-        elevations, clutter, distance_m, candidate["frequency_mhz"], climatology[0], sea
+        elevations, clutter, distance_m, candidate["frequency_mhz"], climatology[0], sea,
+        candidate.get("tx_height_m", TX_HEIGHT_M)
     )
     if diffraction_db is None or not math.isfinite(diffraction_db):
         return None
@@ -716,7 +765,8 @@ def model_grid_cell(cell: tuple[int, int, float, float]) -> tuple:
     return row, column, *(cell_signals[key] for key in output_keys)
 
 
-def write_metadata(sites_data: dict, grid: dict, land_cells: int) -> None:
+def write_metadata(sites_data: dict, grid: dict, land_cells: int,
+                   height_metadata: dict | None = None) -> None:
     info = {
         "title": "Ireland mobile signal estimate",
         "siteSource": sites_data["source"],
@@ -726,7 +776,7 @@ def write_metadata(sites_data: dict, grid: dict, land_cells: int) -> None:
         "networks": sites_data["networks"],
         "technologyBits": sites_data["technologyBits"],
         "gridSpacingProjectedM": GRID_M,
-        "approximateGroundResolutionM": 300,
+        "approximateGroundResolutionM": round(GRID_M * math.cos(math.radians(53.5))),
         "landGridCells": land_cells,
         "imageCoordinates": grid["image_coordinates"],
         "imageWidth": grid["width"],
@@ -741,6 +791,7 @@ def write_metadata(sites_data: dict, grid: dict, land_cells: int) -> None:
             "clutterSource": "Copernicus / EEA CORINE Land Cover 2018, representative 160 m clutter categories",
             "climateSource": "ITU-R P.1812-8 median annual ΔN grid",
             "transmitterHeightM": TX_HEIGHT_M,
+            "transmitterHeightDefaultM": TX_HEIGHT_M,
             "receiverHeightM": RX_HEIGHT_M,
             "linkBudgetAllowanceDb": LINK_BUDGET_ALLOWANCE_DB,
             "maxRangeM": MAX_RANGE_M,
@@ -748,7 +799,7 @@ def write_metadata(sites_data: dict, grid: dict, land_cells: int) -> None:
             "weatherAdjustment": False,
             "notes": [
                 "Licensed maximum EIRP and band schedules are not measurements of active handset coverage.",
-                "The input does not include operational sector configuration, antenna azimuth, downtilt, or actual antenna height.",
+                "A planning-informed estimated highest antenna height is used only where a matched planning description states a support-structure height; the estimate is structure height minus 1 m. Other records retain the 30 m default. This is not verified current equipment; proposal and ambiguous statuses remain labelled in the input.",
                 "The 48 dB link allowance is uncalibrated; map classes are indicative and do not have a statistical confidence level.",
                 "The national image grid is for country-scale display; the underlying route model remains more detailed along selected trails."
             ]
@@ -756,12 +807,15 @@ def write_metadata(sites_data: dict, grid: dict, land_cells: int) -> None:
         "boundarySource": "Natural Earth 1:10m Admin 0 – Countries, v5.1.1, Ireland polygon",
         "boundarySourceUrl": "https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/",
     }
+    if height_metadata is not None:
+        info["transmitterHeightEstimates"] = height_metadata
     (OUTPUT_DIR / "coverage-metadata.json").write_text(json.dumps(info, separators=(",", ":")) + "\n")
 
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     sites_data = json.loads(SITES_PATH.read_text())
+    site_heights, height_metadata = load_site_height_estimates(sites_data)
     boundary, polygons, bounds = read_boundary()
     grid = grid_for_boundary(polygons, bounds)
     land_cells = len(grid["rows"])
@@ -770,7 +824,7 @@ def main() -> None:
     terrain_tiles = load_elevation_tiles(grid)
     clutter_sampler = ClutterSampler()
     climate = load_climate()
-    site_indexes = build_site_band_indexes(sites_data)
+    site_indexes = build_site_band_indexes(sites_data, site_heights)
     networks = list(sites_data["networks"])
     signals = {
         (network, technology): np.full((grid["height"], grid["width"]), np.nan, dtype=np.float32)
@@ -811,7 +865,7 @@ def main() -> None:
         coverage_image.save(coverage_path, optimize=True)
         sensitivity_image.save(sensitivity_path, optimize=True)
         log(f"Wrote {coverage_path.name} ({coverage_path.stat().st_size / 1024:.1f} KiB)")
-    write_metadata(sites_data, grid, land_cells)
+    write_metadata(sites_data, grid, land_cells, height_metadata)
     log(f"Done in {(time.monotonic() - started) / 60:.1f} minutes")
 
 
