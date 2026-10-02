@@ -532,6 +532,7 @@ def load_site_height_estimates(sites_data: dict) -> tuple[list[dict], dict]:
         raise ValueError(f"Site-height input has {len(rows)} rows; expected {len(records)}")
     aligned = []
     status_counts: dict[str, int] = {}
+    fallback_reason_counts: dict[str, int] = {}
     applied = 0
     for index, (row, site) in enumerate(zip(rows, records)):
         if int(row["recordIndex"]) != index:
@@ -548,15 +549,18 @@ def load_site_height_estimates(sites_data: dict) -> tuple[list[dict], dict]:
         if raw_height:
             applied += 1
             status_counts[status] = status_counts.get(status, 0) + 1
+        else:
+            fallback_reason_counts[status] = fallback_reason_counts.get(status, 0) + 1
         aligned.append({"height_m": height, "status": status})
     summary = {
         "source": "model-inputs/mobile-site-height-estimates.csv",
-        "method": "For a planning match within 30 m, use stated mast/support structure height minus 1 m as an estimated highest/top-mounted antenna height; otherwise retain the 30 m default.",
+        "method": "For a planning match within 30 m, use stated mast/support structure height minus 1 m as an estimated highest/top-mounted antenna height; otherwise retain the 30 m default. Rooftop-level support heights without a ground datum and alternate 50 m-only planning leads are excluded.",
         "defaultHeightM": TX_HEIGHT_M,
         "recordsTotal": len(records),
         "recordsWithEstimate": applied,
         "recordsUsingDefault": len(records) - applied,
         "heightStatusCounts": status_counts,
+        "fallbackReasonCounts": fallback_reason_counts,
         "planningMatchMaximumDistanceM": 30,
         "identityCaveat": "Planning/site matches are largely automated coordinate/text candidates and are not individually verified; proposed and ambiguous records are retained with status labels.",
     }
@@ -799,7 +803,7 @@ def write_metadata(sites_data: dict, grid: dict, land_cells: int,
             "weatherAdjustment": False,
             "notes": [
                 "Licensed maximum EIRP and band schedules are not measurements of active handset coverage.",
-                "A planning-informed estimated highest antenna height is used only where a matched planning description states a support-structure height; the estimate is structure height minus 1 m. Other records retain the 30 m default. This is not verified current equipment; proposal and ambiguous statuses remain labelled in the input.",
+                "A planning-informed estimated highest antenna height is used only where a matched planning description states a support-structure height; the estimate is structure height minus 1 m. Other records retain the 30 m default. Rooftop-relative heights without a ground datum and alternate 50 m-only matches are excluded. This is not verified current equipment; proposal and ambiguous statuses remain labelled in the input.",
                 "The 48 dB link allowance is uncalibrated; map classes are indicative and do not have a statistical confidence level.",
                 "The national image grid is for country-scale display; the underlying route model remains more detailed along selected trails."
             ]
