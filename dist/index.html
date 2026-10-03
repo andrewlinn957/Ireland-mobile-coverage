@@ -486,12 +486,12 @@
       selectedNetwork = button.dataset.network;
       setNetworkControls();
       setSiteLayerVisibility();
-      if (metadata && map?.isStyleLoaded()) addCoverageLayer();
+      if (metadata && map) addCoverageLayer();
     }));
     document.querySelectorAll("[data-technology]").forEach((button) => button.addEventListener("click", () => {
       selectedTechnology = button.dataset.technology;
       setNetworkControls();
-      if (metadata && map?.isStyleLoaded()) addCoverageLayer();
+      if (metadata && map) addCoverageLayer();
     }));
     $("#show-sites").addEventListener("change", (event) => {
       showSites = event.currentTarget.checked;
